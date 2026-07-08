@@ -573,6 +573,7 @@ function selectFruitCatch(){
   document.getElementById('fruitBestStart').textContent = fruitBestScore;
   fruitStartPanel.classList.remove('hidden');
   homeBtn.classList.remove('hidden');
+  btnJump.classList.add('hidden');
 }
 
 homeBtn.addEventListener('click', goToMenu);
@@ -1210,9 +1211,10 @@ function render(){
 /* ===================== ミニゲーム2: フルーツキャッチ ===================== */
 const FRUIT_TIME_LIMIT = 60;
 const FRUIT_PLAYER_SPEED = 420;
-const FRUIT_BASKET_W = 92;
-const FRUIT_BASKET_Y = GROUND_Y - 56;
-const FRUIT_BASKET_H = 42;
+const FRUIT_BASKET_W = 96;
+const FRUIT_BASKET_H = 38;
+const FRUIT_BASKET_Y = GROUND_Y - 28; // バスケットは体の下半分だけに重ねる(うさぎの顔・上半身は隠れないように)
+const FRUIT_BUNNY_W = 64; // うさぎ本体の描画幅(足元をGROUND_Yに接地させる)
 const FRUIT_RADIUS = 15;
 const FRUIT_TYPES = [
   { type:'red',    color:'#e0453f', pts:1, weight:74 },
@@ -1241,6 +1243,7 @@ let fruitMusicTimer = null;
 
 function showFruitControlsUI(show){
   [btnLeft, btnRight].forEach(b=> b.classList.toggle('hidden', !show));
+  btnJump.classList.add('hidden'); // フルーツキャッチにジャンプ操作は無いので常に非表示
   fruitHud.classList.toggle('hidden', !show);
 }
 
@@ -1410,9 +1413,9 @@ function drawFruitPlayer(){
   ctx.beginPath(); ctx.ellipse(centerX, GROUND_Y+6, FRUIT_BASKET_W*0.4, 6, 0,0,Math.PI*2); ctx.fill();
   ctx.restore();
 
-  const bw = 54, bh = bw*BUNNY_ASPECT;
+  const bw = FRUIT_BUNNY_W, bh = bw*BUNNY_ASPECT;
   ctx.save();
-  ctx.translate(centerX, GROUND_Y - 8);
+  ctx.translate(centerX, GROUND_Y);
   ctx.scale(-fruitPlayer.facing, 1);
   if(BUNNY_IMG.complete && BUNNY_IMG.naturalWidth>0){
     ctx.drawImage(BUNNY_IMG, -bw/2, -bh, bw, bh);
