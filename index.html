@@ -165,6 +165,7 @@ const SFX = {
   stomp: ()=>sfx(220,0.15,'sawtooth',0.15),
   hit: ()=>sfx(120,0.3,'sawtooth',0.18),
   oneup: ()=>{ sfx(660,0.12,'triangle',0.16); setTimeout(()=>sfx(880,0.12,'triangle',0.16),100); setTimeout(()=>sfx(1320,0.2,'triangle',0.18),200); },
+  breakBlock: ()=>sfx(180,0.12,'square',0.16),
   gameover: ()=>{ sfx(300,0.2,'sawtooth',0.15); setTimeout(()=>sfx(180,0.35,'sawtooth',0.15),150); }
 };
 
@@ -187,7 +188,7 @@ function startMusic(){
 const NUM_STAGES = 6;
 let state = 'start'; // start | playing | stageclear | allclear | over
 let camera = { x:0 };
-let player, segments, hazards, enemies, apples, particles;
+let player, segments, hazards, enemies, apples, particles, platforms, crates;
 let lastGroundY, generatedUntilX, lastSafeX, lastSafeY;
 let score, lives, distance, bestScore;
 let stage = 1, stageGoalX = 0, goal = null;
@@ -215,6 +216,8 @@ function setupStage(n){
   enemies = [];
   apples = [];
   particles = [];
+  platforms = [];
+  crates = [];
   camera.x = 0;
   lastGroundY = GROUND_Y;
   generatedUntilX = 0;
@@ -273,19 +276,23 @@ function genChunk(){
 
   const r = Math.random();
   let type;
-  const flatP = clamp(0.40 - t*0.22, 0.14, 0.40);
-  const gapP  = clamp(0.26 + t*0.12, 0.26, 0.40);
-  const stepP = 0.22;
+  const flatP = clamp(0.34 - t*0.18, 0.16, 0.34);
+  const gapP  = clamp(0.20 + t*0.06, 0.20, 0.26);
+  const stepP = 0.14;
+  const crateP = clamp(0.12 + t*0.06, 0.12, 0.18);
+  const floatgapP = clamp(0.06 + t*0.10, 0.06, 0.16);
   if(startX < 700) type = 'flat'; // 開始直後は必ず安全地帯
   else if(r < flatP) type = 'flat';
   else if(r < flatP+gapP) type = 'gap';
   else if(r < flatP+gapP+stepP) type = 'step';
+  else if(r < flatP+gapP+stepP+crateP) type = 'crate';
+  else if(r < flatP+gapP+stepP+crateP+floatgapP) type = 'floatgap';
   else type = 'spike';
 
-  // フェアネス調整: 難所が連続しすぎない・隙間の直後にトゲを置かない
+  // フェアネス調整: 難所が連続しすぎない・隙間系の直後にトゲを置かない
   if(startX >= 700){
     if(hardStreak >= 2 && type !== 'flat') type = 'flat';
-    if(lastChunkType === 'gap' && type === 'spike') type = (Math.random()<0.5?'flat':'step');
+    if((lastChunkType === 'gap' || lastChunkType === 'floatgap') && type === 'spike') type = (Math.random()<0.5?'flat':'step');
   }
   lastChunkType = type;
   hardStreak = (type === 'flat') ? 0 : hardStreak+1;
@@ -296,6 +303,14 @@ function genChunk(){
     if(Math.random() < 0.65) spawnAppleRow(startX+40, startX+w-40, prevY);
     if(Math.random() < 0.35+0.35*t && w > 300) spawnEnemy(startX+w*0.25, startX+w*0.8, prevY);
     if(Math.random() < 0.15*t && w > 380) spawnEnemy(startX+w*0.55, startX+w*0.95, prevY);
+    // 戻ってジャンプしないと届かないボーナス足場(任意ルート)
+    if(Math.random() < 0.22 && w > 340){
+      const bx1 = startX + w*0.58;
+      const bw = rand(70,110);
+      const by = prevY - rand(88,118);
+      platforms.push({x1:bx1, x2:bx1+bw, y:by});
+      apples.push({x:bx1+bw*0.5, y:by-28, r:12, alive:true});
+    }
     lastGroundY = prevY;
     generatedUntilX = startX+w;
   } else if(type === 'gap'){
@@ -317,6 +332,31 @@ function genChunk(){
     if(Math.random() < 0.25+0.35*t) spawnEnemy(startX+w*0.3, startX+w*0.8, newY);
     lastGroundY = newY;
     generatedUntilX = startX+w;
+  } else if(type === 'crate'){
+    // 壊せるクレート: 上から踏むと壊れる/横からはぶつかって止まる(ジャンプで越えることも可能)
+    const w = rand(260,420);
+    segments.push({x1:startX, x2:startX+w, y:prevY});
+    const ccx = startX + w*0.5;
+    const crateH = rand(55,80);
+    crates.push({x1:ccx-18, x2:ccx+18, y:prevY-crateH, bottom:prevY, alive:true});
+    if(Math.random() < 0.5) spawnAppleRow(startX+20, ccx-40, prevY);
+    if(Math.random() < 0.5) spawnAppleRow(ccx+40, startX+w-20, prevY);
+    lastGroundY = prevY;
+    generatedUntilX = startX+w;
+  } else if(type === 'floatgap'){
+    // 浮遊足場を挟んだ長い隙間: 1回のジャンプでは届かない距離を2段ジャンプで越える
+    const gap1 = clamp(rand(70,120) + t*20, 70, 150);
+    const platW = rand(90,140);
+    const gap2 = clamp(rand(70,120) + t*20, 70, 150);
+    const nextW = rand(240,380);
+    const platY = prevY - rand(20,70);
+    if(segments.length){ segments[segments.length-1].warnEdge = true; }
+    platforms.push({x1:startX+gap1, x2:startX+gap1+platW, y:platY});
+    segments.push({x1:startX+gap1+platW+gap2, x2:startX+gap1+platW+gap2+nextW, y:prevY});
+    if(Math.random() < 0.6) apples.push({x:startX+gap1+platW*0.5, y:platY-30, r:12, alive:true});
+    if(Math.random() < 0.5) spawnAppleRow(startX+gap1+platW+gap2+30, startX+gap1+platW+gap2+nextW-30, prevY);
+    lastGroundY = prevY;
+    generatedUntilX = startX+gap1+platW+gap2+nextW;
   } else { // spike
     const w = rand(280,440);
     segments.push({x1:startX, x2:startX+w, y:prevY});
@@ -340,10 +380,13 @@ function cleanupWorld(){
   enemies = enemies.filter(e=>e.alive && e.x+e.w > cutoff);
   apples = apples.filter(a=>a.alive && a.x > cutoff);
   particles = particles.filter(p=>p.life>0);
+  platforms = platforms.filter(p=>p.x2 > cutoff);
+  crates = crates.filter(c=>c.alive && c.x2 > cutoff);
 }
 
 function findGroundAt(cx){
   for(const s of segments){ if(cx >= s.x1 && cx <= s.x2) return s; }
+  for(const p of platforms){ if(cx >= p.x1 && cx <= p.x2) return p; }
   return null;
 }
 
@@ -537,10 +580,39 @@ function update(dt){
   player.vy = clamp(player.vy + GRAVITY*dt, -99999, MAX_FALL);
 
   const prevBottom = player.y + player.h;
+  const prevX = player.x;
   player.x += player.vx*dt;
+
+  // 壁判定(段差やクレートの側面にめり込むバグの修正): 足元がその足場の面より下にある時だけ側面を壁として扱う
+  const solids = segments.concat(crates);
+  for(const s of solids){
+    if(player.y + player.h <= s.y + 2) continue;
+    const overlapX = player.x < s.x2 && player.x + player.w > s.x1;
+    if(!overlapX) continue;
+    if(player.vx > 0 && prevX + player.w <= s.x1 + 1){
+      player.x = s.x1 - player.w; player.vx = 0;
+    } else if(player.vx < 0 && prevX >= s.x2 - 1){
+      player.x = s.x2; player.vx = 0;
+    }
+  }
+
   player.y += player.vy*dt;
 
   if(player.x < 10) player.x = 10;
+
+  // クレートを上から踏むと壊れる
+  for(const c of crates){
+    if(!c.alive) continue;
+    const overlapX = player.x < c.x2 && player.x + player.w > c.x1;
+    if(overlapX && player.vy > 0 && prevBottom <= c.y + 6 && (player.y+player.h) >= c.y){
+      c.alive = false;
+      player.vy = BOUNCE_VEL*0.7;
+      score += 5;
+      SFX.breakBlock();
+      spawnBurst((c.x1+c.x2)/2, c.y, '#c9a06a');
+    }
+  }
+  if(crates.some(c=>!c.alive)) crates = crates.filter(c=>c.alive);
 
   // 地面判定(中心x基準)
   const cx = player.x + player.w/2;
@@ -716,6 +788,35 @@ function drawSegments(){
         ctx.fillRect(x2-stripeW+sx, y-5, 6, 5);
       }
     }
+  }
+}
+
+function drawPlatforms(){
+  for(const p of platforms){
+    const x1 = worldToScreenX(p.x1), x2 = worldToScreenX(p.x2);
+    if(x2 < -20 || x1 > BASE_W+20) continue;
+    ctx.fillStyle = '#7fbf5a';
+    ctx.fillRect(x1, p.y-4, x2-x1, 5);
+    ctx.fillStyle = '#c9925a';
+    ctx.fillRect(x1, p.y, x2-x1, 12);
+    ctx.fillStyle = '#a97540';
+    ctx.fillRect(x1, p.y+12, x2-x1, 7);
+  }
+}
+
+function drawCrates(){
+  for(const c of crates){
+    if(!c.alive) continue;
+    const x1 = worldToScreenX(c.x1), x2 = worldToScreenX(c.x2);
+    if(x2 < -20 || x1 > BASE_W+20) continue;
+    ctx.fillStyle = '#d8a05a';
+    ctx.fillRect(x1, c.y, x2-x1, c.bottom-c.y);
+    ctx.strokeStyle = '#8a5a2a'; ctx.lineWidth = 3;
+    ctx.strokeRect(x1, c.y, x2-x1, c.bottom-c.y);
+    ctx.beginPath();
+    ctx.moveTo(x1, c.y); ctx.lineTo(x2, c.bottom);
+    ctx.moveTo(x2, c.y); ctx.lineTo(x1, c.bottom);
+    ctx.stroke();
   }
 }
 
@@ -924,6 +1025,8 @@ function render(){
   drawBackground();
   drawPits();
   drawSegments();
+  drawPlatforms();
+  drawCrates();
   drawHazards();
   drawApples();
   drawEnemies();
