@@ -69,6 +69,22 @@
     font-size:18px; cursor:pointer; touch-action:none;
   }
   .btnBlock{ display:block; width:82%; margin:12px auto 0; }
+  .panel input[type="text"]{
+    width:78%; padding:10px 14px; font-size:16px; border:2px solid #d9b8a0;
+    border-radius:12px; margin:10px 0; text-align:center; font-family:inherit;
+    background:#fff;
+  }
+  .panel input[type="text"]:focus{ outline:none; border-color:#ff9eb5; }
+  #rankingList{
+    list-style:none; padding:0; margin:14px 0; max-height:280px; overflow-y:auto; text-align:left;
+  }
+  #rankingList li{
+    display:flex; justify-content:space-between; gap:10px; padding:8px 12px; margin:4px 0;
+    background:rgba(255,158,181,0.12); border-radius:10px; font-size:14px; color:#6b4034;
+  }
+  #rankingList li.top3{ background:rgba(255,158,181,0.32); font-weight:bold; }
+  #rankingList li .rkName{ flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:left; }
+  #rankingList .rkEmpty{ color:#a98a7a; font-size:14px; padding:10px 0; text-align:center; }
 </style>
 </head>
 <body>
@@ -108,6 +124,7 @@
     <p>PC： ← → で移動 / スペース or ↑ でジャンプ<br>スマホ：画面下のボタンで操作</p>
     <div class="big">ベストスコア：<span id="bestScoreStart">0</span></div>
     <button class="btn" id="startBtn">スタート</button>
+    <button class="btn btnBlock" id="rankingBtnStart">🏆 ランキングを見る</button>
   </div>
   <div class="panel hidden" id="overPanel">
     <h1>ゲームオーバー</h1>
@@ -117,6 +134,7 @@
     <p>ベストスコア：<span id="bestScoreEnd">0</span></p>
     <button class="btn hidden" id="continueBtn">ステージ<span id="continueStageNum">1</span>からつづける</button>
     <button class="btn" id="retryBtn">さいしょから</button>
+    <button class="btn btnBlock" id="rankingBtnOver">🏆 ランキングを見る</button>
   </div>
   <div class="panel hidden" id="clearPanel">
     <h1>🎉 ステージ<span id="clearStageNum">1</span> クリア！</h1>
@@ -128,6 +146,7 @@
     <p class="big">最終スコア：<span id="allClearScore">0</span></p>
     <p>ベストスコア：<span id="allClearBest">0</span></p>
     <button class="btn" id="playAgainBtn">最初から遊ぶ</button>
+    <button class="btn btnBlock" id="rankingBtnAllClear">🏆 ランキングを見る</button>
   </div>
 
   <div class="panel hidden" id="fruitStartPanel">
@@ -137,6 +156,7 @@
     <p>PC： ← → で移動 / スマホ：画面下のボタンで操作</p>
     <div class="big">ベストスコア：<span id="fruitBestStart">0</span></div>
     <button class="btn" id="fruitStartBtn">スタート</button>
+    <button class="btn btnBlock" id="rankingBtnFruitStart">🏆 ランキングを見る</button>
   </div>
   <div class="panel hidden" id="fruitOverPanel">
     <h1>⏰ タイムアップ！</h1>
@@ -144,7 +164,24 @@
     <p>🔴 <span id="fruitRedCount">0</span>個　🥈 <span id="fruitSilverCount">0</span>個　🥇 <span id="fruitGoldCount">0</span>個</p>
     <p>ベストスコア：<span id="fruitBestEnd">0</span></p>
     <button class="btn" id="fruitRetryBtn">もう一度</button>
+    <button class="btn btnBlock" id="rankingBtnFruitOver">🏆 ランキングを見る</button>
     <button class="btn btnBlock" id="fruitMenuBtn">ゲーム選択へ</button>
+  </div>
+
+  <div class="panel hidden" id="nameEntryPanel">
+    <h1>🎉 ランクイン！</h1>
+    <p class="big">スコア：<span id="nameEntryScore">0</span></p>
+    <p>ランキングに登録するなまえを入力してね</p>
+    <input type="text" id="nameEntryInput" maxlength="12" placeholder="なまえ(12文字まで)">
+    <br>
+    <button class="btn" id="nameEntrySubmitBtn">とうろくする</button>
+    <button class="btn btnBlock" id="nameEntrySkipBtn">とうろくしない</button>
+  </div>
+
+  <div class="panel hidden" id="rankingPanel">
+    <h1 id="rankingTitle">🏆 ランキング</h1>
+    <ol id="rankingList"></ol>
+    <button class="btn" id="rankingCloseBtn">とじる</button>
   </div>
 </div>
 
@@ -555,6 +592,8 @@ function goToMenu(){
   fruitState = 'start';
   activeGame = null;
   homeBtn.classList.add('hidden');
+  nameEntryPanel.classList.add('hidden');
+  rankingPanel.classList.add('hidden');
   clearCanvasView();
   gameSelectPanel.classList.remove('hidden');
 }
@@ -579,6 +618,108 @@ function selectFruitCatch(){
 homeBtn.addEventListener('click', goToMenu);
 document.getElementById('selectSidescrollBtn').addEventListener('click', selectSidescroll);
 document.getElementById('selectFruitCatchBtn').addEventListener('click', selectFruitCatch);
+
+/* ===================== ランキング(ゲーム別・ローカル保存) ===================== */
+const RANKING_MAX = 10;
+const RANKING_KEY_SIDESCROLL = 'usagi_ranking_sidescroll';
+const RANKING_KEY_FRUITCATCH = 'usagi_ranking_fruitcatch';
+
+function loadRanking(key){
+  try{
+    const list = JSON.parse(localStorage.getItem(key) || '[]');
+    return Array.isArray(list) ? list : [];
+  }catch(e){ return []; }
+}
+function saveRanking(key, list){
+  localStorage.setItem(key, JSON.stringify(list));
+}
+function qualifiesForRanking(key, score){
+  if(score <= 0) return false;
+  const list = loadRanking(key);
+  if(list.length < RANKING_MAX) return true;
+  return score > list[list.length - 1].score;
+}
+function addRanking(key, name, score){
+  const list = loadRanking(key);
+  list.push({ name, score, t: Date.now() });
+  list.sort((a,b)=> b.score - a.score || a.t - b.t);
+  if(list.length > RANKING_MAX) list.length = RANKING_MAX;
+  saveRanking(key, list);
+}
+
+const nameEntryPanel = document.getElementById('nameEntryPanel');
+const nameEntryInput = document.getElementById('nameEntryInput');
+const rankingPanel = document.getElementById('rankingPanel');
+const rankingList = document.getElementById('rankingList');
+let pendingRankingKey = null, pendingRankingScore = 0, pendingAfterRanking = null;
+
+function maybeShowRankingEntry(key, score, afterFn){
+  if(qualifiesForRanking(key, score)){
+    pendingRankingKey = key;
+    pendingRankingScore = score;
+    pendingAfterRanking = afterFn;
+    document.getElementById('nameEntryScore').textContent = score;
+    nameEntryInput.value = localStorage.getItem('usagi_last_name') || '';
+    nameEntryPanel.classList.remove('hidden');
+    setTimeout(()=>{ try{ nameEntryInput.focus(); }catch(e){} }, 0);
+  } else {
+    afterFn();
+  }
+}
+
+function submitRankingEntry(){
+  let name = nameEntryInput.value.trim();
+  if(!name) name = 'ゲスト';
+  name = name.slice(0, 12);
+  addRanking(pendingRankingKey, name, pendingRankingScore);
+  localStorage.setItem('usagi_last_name', name);
+  nameEntryPanel.classList.add('hidden');
+  const after = pendingAfterRanking;
+  pendingAfterRanking = null;
+  if(after) after();
+}
+function skipRankingEntry(){
+  nameEntryPanel.classList.add('hidden');
+  const after = pendingAfterRanking;
+  pendingAfterRanking = null;
+  if(after) after();
+}
+document.getElementById('nameEntrySubmitBtn').addEventListener('click', submitRankingEntry);
+document.getElementById('nameEntrySkipBtn').addEventListener('click', skipRankingEntry);
+nameEntryInput.addEventListener('keydown', e=>{ if(e.key === 'Enter') submitRankingEntry(); });
+
+function showRanking(key, title){
+  document.getElementById('rankingTitle').textContent = title;
+  const list = loadRanking(key);
+  rankingList.innerHTML = '';
+  if(list.length === 0){
+    const li = document.createElement('li');
+    li.className = 'rkEmpty';
+    li.textContent = 'まだ記録がないよ。最初のランカーになろう！';
+    rankingList.appendChild(li);
+  } else {
+    list.forEach((entry, i)=>{
+      const li = document.createElement('li');
+      if(i < 3) li.className = 'top3';
+      const rankMedal = ['🥇','🥈','🥉'][i] || (i+1)+'位';
+      const nameSpan = document.createElement('span');
+      nameSpan.className = 'rkName';
+      nameSpan.textContent = rankMedal + ' ' + entry.name;
+      const scoreSpan = document.createElement('span');
+      scoreSpan.textContent = entry.score + 'pt';
+      li.appendChild(nameSpan);
+      li.appendChild(scoreSpan);
+      rankingList.appendChild(li);
+    });
+  }
+  rankingPanel.classList.remove('hidden');
+}
+document.getElementById('rankingCloseBtn').addEventListener('click', ()=> rankingPanel.classList.add('hidden'));
+document.getElementById('rankingBtnStart').addEventListener('click', ()=> showRanking(RANKING_KEY_SIDESCROLL, '🏆 うさぎの大冒険 ランキング'));
+document.getElementById('rankingBtnOver').addEventListener('click', ()=> showRanking(RANKING_KEY_SIDESCROLL, '🏆 うさぎの大冒険 ランキング'));
+document.getElementById('rankingBtnAllClear').addEventListener('click', ()=> showRanking(RANKING_KEY_SIDESCROLL, '🏆 うさぎの大冒険 ランキング'));
+document.getElementById('rankingBtnFruitStart').addEventListener('click', ()=> showRanking(RANKING_KEY_FRUITCATCH, '🏆 フルーツキャッチ ランキング'));
+document.getElementById('rankingBtnFruitOver').addEventListener('click', ()=> showRanking(RANKING_KEY_FRUITCATCH, '🏆 フルーツキャッチ ランキング'));
 
 /* ===================== ゲーム制御 ===================== */
 const startPanel = document.getElementById('startPanel');
@@ -644,7 +785,9 @@ function allClear(){
   if(score > bestScore){ bestScore = score; localStorage.setItem('usagi_best', String(bestScore)); }
   document.getElementById('allClearScore').textContent = score;
   document.getElementById('allClearBest').textContent = bestScore;
-  allClearPanel.classList.remove('hidden');
+  maybeShowRankingEntry(RANKING_KEY_SIDESCROLL, score, ()=>{
+    allClearPanel.classList.remove('hidden');
+  });
 }
 
 function loseLife(){
@@ -675,7 +818,9 @@ function endGame(){
   } else {
     continueBtn.classList.add('hidden');
   }
-  overPanel.classList.remove('hidden');
+  maybeShowRankingEntry(RANKING_KEY_SIDESCROLL, score, ()=>{
+    overPanel.classList.remove('hidden');
+  });
 }
 
 document.getElementById('startBtn').addEventListener('click', startGame);
@@ -1292,7 +1437,9 @@ function endFruitGame(){
   document.getElementById('fruitSilverCount').textContent = fruitCatchCount.silver;
   document.getElementById('fruitGoldCount').textContent = fruitCatchCount.gold;
   document.getElementById('fruitBestEnd').textContent = fruitBestScore;
-  fruitOverPanel.classList.remove('hidden');
+  maybeShowRankingEntry(RANKING_KEY_FRUITCATCH, fruitScore, ()=>{
+    fruitOverPanel.classList.remove('hidden');
+  });
 }
 
 function fruitCatchSfx(type){
