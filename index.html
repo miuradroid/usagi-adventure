@@ -83,6 +83,7 @@
   <div class="panel" id="startPanel">
     <h1>🐰 うさぎのりんご大冒険</h1>
     <p>障害物をよけながらりんごを集め、ゴールを目指そう！<br>敵は上から踏んでやっつけよう。ステージを進むほど難しくなるよ。</p>
+    <p>全3ワールド(1〜3)×各6ステージの全18ステージ！ワールドが変わると景色とBGMもガラリと変わるよ。</p>
     <p>りんごを20個集めるごとにライフが1つ増えるよ🍎</p>
     <p>PC： ← → で移動 / スペース or ↑ でジャンプ<br>スマホ：画面下のボタンで操作</p>
     <div class="big">ベストスコア：<span id="bestScoreStart">0</span></div>
@@ -91,7 +92,7 @@
   <div class="panel hidden" id="overPanel">
     <h1>ゲームオーバー</h1>
     <p class="big">スコア：<span id="finalScore">0</span></p>
-    <p>到達ステージ：<span id="finalStage">1</span> / 6</p>
+    <p>到達ステージ：<span id="finalStage">1-1</span> / 3-6</p>
     <p>進んだ距離：<span id="finalDist">0</span> m</p>
     <p>ベストスコア：<span id="bestScoreEnd">0</span></p>
     <button class="btn hidden" id="continueBtn">ステージ<span id="continueStageNum">1</span>からつづける</button>
@@ -180,23 +181,48 @@ const SFX = {
   gameover: ()=>{ sfx(300,0.2,'sawtooth',0.15); setTimeout(()=>sfx(180,0.35,'sawtooth',0.15),150); }
 };
 
-/* ===================== BGM(簡易ループ) ===================== */
+/* ===================== BGM(ワールド別ループ) ===================== */
 let musicTimer = null;
 let musicStep = 0;
-const MUSIC_NOTES = [261.6, 329.6, 392.0, 329.6, 293.7, 349.2, 440.0, 349.2];
+let currentMusicWorld = null;
+// ワールドごとに音階・テンポ・音色を大きく変えて雰囲気を切り替える
+const MUSIC_THEMES = [
+  { // ワールド1: 草原(明るい長調ペンタトニック)
+    notes: [261.6, 329.6, 392.0, 329.6, 293.7, 349.2, 440.0, 349.2],
+    tempo: 260, wave1:'triangle', vol1:0.045, dur1:0.35, wave2:'sine', vol2:0.03, dur2:0.18
+  },
+  { // ワールド2: 夕暮れの森(短調寄りのエキゾチックな音階、少しゆったり)
+    notes: [293.7, 349.2, 392.0, 466.2, 392.0, 349.2, 311.1, 349.2],
+    tempo: 300, wave1:'sawtooth', vol1:0.035, dur1:0.4, wave2:'triangle', vol2:0.03, dur2:0.2
+  },
+  { // ワールド3: 夜の山(低く神秘的な短調、テンポも落として緊張感を演出)
+    notes: [220.0, 261.6, 246.9, 293.7, 220.0, 196.0, 220.0, 174.6],
+    tempo: 340, wave1:'sine', vol1:0.05, dur1:0.5, wave2:'square', vol2:0.02, dur2:0.15
+  }
+];
 function startMusic(){
-  if(musicTimer) return;
+  const w = worldOf(stage);
+  if(musicTimer && currentMusicWorld === w) return;
+  if(musicTimer){ clearInterval(musicTimer); musicTimer = null; }
+  currentMusicWorld = w;
+  musicStep = 0;
+  const theme = MUSIC_THEMES[w-1];
   musicTimer = setInterval(()=>{
     if(!actx || actx.state !== 'running') return;
-    const base = MUSIC_NOTES[musicStep % MUSIC_NOTES.length];
-    sfx(base/2, 0.35, 'triangle', 0.045);
-    if(musicStep % 2 === 0) sfx(base, 0.18, 'sine', 0.03);
+    const base = theme.notes[musicStep % theme.notes.length];
+    sfx(base/2, theme.dur1, theme.wave1, theme.vol1);
+    if(musicStep % 2 === 0) sfx(base, theme.dur2, theme.wave2, theme.vol2);
     musicStep++;
-  }, 260);
+  }, theme.tempo);
 }
 
 /* ===================== ゲーム状態 ===================== */
-const NUM_STAGES = 6;
+const STAGES_PER_WORLD = 6;
+const WORLD_COUNT = 3;
+const NUM_STAGES = STAGES_PER_WORLD * WORLD_COUNT;
+function worldOf(n){ return Math.min(WORLD_COUNT, Math.ceil(n / STAGES_PER_WORLD)); }
+function stageInWorldOf(n){ return ((n-1) % STAGES_PER_WORLD) + 1; }
+function stageLabel(n){ return worldOf(n) + '-' + stageInWorldOf(n); }
 let state = 'start'; // start | playing | stageclear | allclear | over
 let camera = { x:0 };
 let player, segments, hazards, enemies, apples, particles, platforms, crates;
@@ -238,7 +264,10 @@ function setupStage(n){
   goal = null;
   lastChunkType = 'flat';
   hardStreak = 0;
-  stageGoalX = 6000 + (n-1)*1500; // スーパーマリオ程度の距離感
+  // ワールド1(1-1〜1-6)は従来通りの距離感、ワールド2・3はゆるやかに距離を伸ばす
+  stageGoalX = (n <= STAGES_PER_WORLD)
+    ? 6000 + (n-1)*1500
+    : 13500 + (n-STAGES_PER_WORLD)*500;
 
   // 最初の安全な足場をまとまった距離ぶん確保
   segments.push({x1:-50, x2:520, y:GROUND_Y});
@@ -246,7 +275,7 @@ function setupStage(n){
   generatedUntilX = 520;
   while(!goal){ genChunk(); }
 
-  document.getElementById('hudRight').textContent = 'ステージ ' + n + ' / ' + NUM_STAGES;
+  document.getElementById('hudRight').textContent = 'ステージ ' + stageLabel(n);
 }
 
 /* ===================== ステージ自動生成 ===================== */
@@ -504,7 +533,7 @@ function stageClear(){
   state = 'stageclear';
   showControlsUI(false);
   SFX.collect();
-  document.getElementById('clearStageNum').textContent = stage;
+  document.getElementById('clearStageNum').textContent = stageLabel(stage);
   document.getElementById('clearScore').textContent = score;
   clearPanel.classList.remove('hidden');
 }
@@ -516,6 +545,7 @@ function nextStage(){
   setupStage(stage);
   state = 'playing';
   showControlsUI(true);
+  startMusic(); // ワールドが変わっていればBGMを切り替える
 }
 
 function allClear(){
@@ -546,11 +576,11 @@ function endGame(){
   const dist = Math.floor(distance/20);
   if(score > bestScore){ bestScore = score; localStorage.setItem('usagi_best', String(bestScore)); }
   document.getElementById('finalScore').textContent = score;
-  document.getElementById('finalStage').textContent = stage;
+  document.getElementById('finalStage').textContent = stageLabel(stage);
   document.getElementById('finalDist').textContent = dist;
   document.getElementById('bestScoreEnd').textContent = bestScore;
   if(stage > 1){
-    document.getElementById('continueStageNum').textContent = stage;
+    document.getElementById('continueStageNum').textContent = stageLabel(stage);
     continueBtn.classList.remove('hidden');
   } else {
     continueBtn.classList.add('hidden');
@@ -747,15 +777,38 @@ function update(dt){
 /* ===================== 描画 ===================== */
 function worldToScreenX(x){ return x - camera.x; }
 
+// ワールドごとの見た目テーマ(1:草原の昼 / 2:夕暮れの森 / 3:夜の山)
+const WORLD_VISUALS = [
+  { skyTop:'#8fd3ff', skyBottom:'#e9f8ff', cloud:'rgba(255,255,255,0.85)', hill:'#bfe6a8', grass:'#8bc76a', dirt:'#b98455', stars:false },
+  { skyTop:'#ff9a56', skyBottom:'#ffd9a0', cloud:'rgba(255,232,210,0.8)', hill:'#d98a4a', grass:'#c97b3f', dirt:'#8a5a3a', stars:false },
+  { skyTop:'#1b2340', skyBottom:'#3b3f6b', cloud:'rgba(255,255,255,0.5)', hill:'#2f3a5a', grass:'#5b4a8a', dirt:'#332244', stars:true }
+];
+function currentVisuals(){ return WORLD_VISUALS[worldOf(stage)-1]; }
+
 function drawBackground(){
+  const vis = currentVisuals();
   const g = ctx.createLinearGradient(0,0,0,BASE_H);
-  g.addColorStop(0, '#8fd3ff');
-  g.addColorStop(1, '#e9f8ff');
+  g.addColorStop(0, vis.skyTop);
+  g.addColorStop(1, vis.skyBottom);
   ctx.fillStyle = g;
   ctx.fillRect(0,0,BASE_W,BASE_H);
 
+  if(vis.stars){
+    // 星空(視差)
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    for(let i=0;i<40;i++){
+      const wx = (i*137 - (camera.x*0.15) % 4000);
+      const sx = ((wx % (BASE_W+200)) + (BASE_W+200)) % (BASE_W+200) - 100;
+      const sy = (i*53) % 260 + 10;
+      const r = (i%3===0) ? 1.6 : 1;
+      ctx.beginPath();
+      ctx.arc(sx, sy, r, 0, Math.PI*2);
+      ctx.fill();
+    }
+  }
+
   // 雲(視差)
-  ctx.fillStyle = 'rgba(255,255,255,0.85)';
+  ctx.fillStyle = vis.cloud;
   for(let i=0;i<6;i++){
     const wx = (i*380 - (camera.x*0.25) % 2280);
     const cx2 = ((wx % (BASE_W+400)) + (BASE_W+400)) % (BASE_W+400) - 200;
@@ -763,7 +816,7 @@ function drawBackground(){
     roundCloud(cx2, cy);
   }
   // 遠景の丘
-  ctx.fillStyle = '#bfe6a8';
+  ctx.fillStyle = vis.hill;
   for(let i=0;i<5;i++){
     const wx = (i*320 - (camera.x*0.5) % 1600);
     const hx = ((wx % (BASE_W+300)) + (BASE_W+300)) % (BASE_W+300) - 150;
@@ -798,13 +851,14 @@ function drawPits(){
 }
 
 function drawSegments(){
+  const vis = currentVisuals();
   for(const s of segments){
     const x1 = worldToScreenX(s.x1), x2 = worldToScreenX(s.x2);
     if(x2 < -20 || x1 > BASE_W+20) continue;
     const y = s.y;
-    ctx.fillStyle = '#8bc76a';
+    ctx.fillStyle = vis.grass;
     ctx.fillRect(x1, y, x2-x1, 18);
-    ctx.fillStyle = '#b98455';
+    ctx.fillStyle = vis.dirt;
     ctx.fillRect(x1, y+18, x2-x1, BASE_H - (y+18) + 40);
     ctx.fillStyle = 'rgba(0,0,0,0.08)';
     ctx.fillRect(x1, y+18, x2-x1, 6);
@@ -819,10 +873,11 @@ function drawSegments(){
 }
 
 function drawPlatforms(){
+  const vis = currentVisuals();
   for(const p of platforms){
     const x1 = worldToScreenX(p.x1), x2 = worldToScreenX(p.x2);
     if(x2 < -20 || x1 > BASE_W+20) continue;
-    ctx.fillStyle = '#7fbf5a';
+    ctx.fillStyle = vis.grass;
     ctx.fillRect(x1, p.y-4, x2-x1, 5);
     ctx.fillStyle = '#c9925a';
     ctx.fillRect(x1, p.y, x2-x1, 12);
