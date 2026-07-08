@@ -74,6 +74,7 @@
   <div class="panel" id="startPanel">
     <h1>🐰 うさぎのりんご大冒険</h1>
     <p>障害物をよけながらりんごを集め、ゴールを目指そう！<br>敵は上から踏んでやっつけよう。ステージを進むほど難しくなるよ。</p>
+    <p>りんごを20個集めるごとにライフが1つ増えるよ🍎</p>
     <p>PC： ← → で移動 / スペース or ↑ でジャンプ<br>スマホ：画面下のボタンで操作</p>
     <div class="big">ベストスコア：<span id="bestScoreStart">0</span></div>
     <button class="btn" id="startBtn">スタート</button>
@@ -84,7 +85,8 @@
     <p>到達ステージ：<span id="finalStage">1</span> / 6</p>
     <p>進んだ距離：<span id="finalDist">0</span> m</p>
     <p>ベストスコア：<span id="bestScoreEnd">0</span></p>
-    <button class="btn" id="retryBtn">もう一度あそぶ</button>
+    <button class="btn hidden" id="continueBtn">ステージ<span id="continueStageNum">1</span>からつづける</button>
+    <button class="btn" id="retryBtn">さいしょから</button>
   </div>
   <div class="panel hidden" id="clearPanel">
     <h1>🎉 ステージ<span id="clearStageNum">1</span> クリア！</h1>
@@ -162,8 +164,24 @@ const SFX = {
   collect: ()=>sfx(880,0.14,'triangle',0.15),
   stomp: ()=>sfx(220,0.15,'sawtooth',0.15),
   hit: ()=>sfx(120,0.3,'sawtooth',0.18),
+  oneup: ()=>{ sfx(660,0.12,'triangle',0.16); setTimeout(()=>sfx(880,0.12,'triangle',0.16),100); setTimeout(()=>sfx(1320,0.2,'triangle',0.18),200); },
   gameover: ()=>{ sfx(300,0.2,'sawtooth',0.15); setTimeout(()=>sfx(180,0.35,'sawtooth',0.15),150); }
 };
+
+/* ===================== BGM(簡易ループ) ===================== */
+let musicTimer = null;
+let musicStep = 0;
+const MUSIC_NOTES = [261.6, 329.6, 392.0, 329.6, 293.7, 349.2, 440.0, 349.2];
+function startMusic(){
+  if(musicTimer) return;
+  musicTimer = setInterval(()=>{
+    if(!actx || actx.state !== 'running') return;
+    const base = MUSIC_NOTES[musicStep % MUSIC_NOTES.length];
+    sfx(base/2, 0.35, 'triangle', 0.045);
+    if(musicStep % 2 === 0) sfx(base, 0.18, 'sine', 0.03);
+    musicStep++;
+  }, 260);
+}
 
 /* ===================== ゲーム状態 ===================== */
 const NUM_STAGES = 6;
@@ -173,7 +191,10 @@ let player, segments, hazards, enemies, apples, particles;
 let lastGroundY, generatedUntilX, lastSafeX, lastSafeY;
 let score, lives, distance, bestScore;
 let stage = 1, stageGoalX = 0, goal = null;
-let jumpQueued = false;
+let jumpQueued = false, jumpHeld = false, touchJumpHeld = false;
+let applesCollected = 0;
+let lastChunkType = 'flat', hardStreak = 0;
+let toastText = '', toastT = 0;
 
 bestScore = parseInt(localStorage.getItem('usagi_best')||'0', 10) || 0;
 document.getElementById('bestScoreStart').textContent = bestScore;
@@ -182,12 +203,13 @@ function resetGame(){
   stage = 1;
   score = 0;
   lives = 3;
+  applesCollected = 0;
   jumpQueued = false;
   setupStage(stage);
 }
 
 function setupStage(n){
-  player = { x:80, y:GROUND_Y-PLAYER_H, w:PLAYER_W, h:PLAYER_H, vx:0, vy:0, onGround:false, facing:1, invuln:0, animT:0 };
+  player = { x:80, y:GROUND_Y-PLAYER_H, w:PLAYER_W, h:PLAYER_H, vx:0, vy:0, onGround:false, facing:1, invuln:0, animT:0, coyoteT:0, jumpBufferT:0, jumpCut:false };
   segments = [];
   hazards = [];
   enemies = [];
@@ -200,6 +222,8 @@ function setupStage(n){
   lastSafeY = GROUND_Y;
   distance = 0;
   goal = null;
+  lastChunkType = 'flat';
+  hardStreak = 0;
   stageGoalX = 6000 + (n-1)*1500; // スーパーマリオ程度の距離感
 
   // 最初の安全な足場をまとまった距離ぶん確保
@@ -258,6 +282,14 @@ function genChunk(){
   else if(r < flatP+gapP+stepP) type = 'step';
   else type = 'spike';
 
+  // フェアネス調整: 難所が連続しすぎない・隙間の直後にトゲを置かない
+  if(startX >= 700){
+    if(hardStreak >= 2 && type !== 'flat') type = 'flat';
+    if(lastChunkType === 'gap' && type === 'spike') type = (Math.random()<0.5?'flat':'step');
+  }
+  lastChunkType = type;
+  hardStreak = (type === 'flat') ? 0 : hardStreak+1;
+
   if(type === 'flat'){
     const w = rand(280,480);
     segments.push({x1:startX, x2:startX+w, y:prevY});
@@ -269,10 +301,11 @@ function genChunk(){
   } else if(type === 'gap'){
     const gapW = clamp(rand(70,130) + t*35, 70, 165);
     const nextW = rand(260,420);
+    if(segments.length){ segments[segments.length-1].warnEdge = true; }
     segments.push({x1:startX+gapW, x2:startX+gapW+nextW, y:prevY});
     if(Math.random() < 0.5) apples.push({x:startX+gapW/2, y:prevY-100, r:12, alive:true});
     if(Math.random() < 0.6) spawnAppleRow(startX+gapW+30, startX+gapW+nextW-30, prevY);
-    if(Math.random() < 0.2*t) spawnEnemy(startX+gapW+30, startX+gapW+nextW-30, prevY);
+    if(Math.random() < 0.2*t) spawnEnemy(startX+gapW+90, startX+gapW+nextW-30, prevY);
     lastGroundY = prevY;
     generatedUntilX = startX+gapW+nextW;
   } else if(type === 'step'){
@@ -330,7 +363,7 @@ const keys = { left:false, right:false };
 window.addEventListener('keydown', e=>{
   if(['ArrowLeft','a','A'].includes(e.key)) keys.left = true;
   if(['ArrowRight','d','D'].includes(e.key)) keys.right = true;
-  if(['ArrowUp','w','W',' '].includes(e.key)){ jumpQueued = true; e.preventDefault(); }
+  if(['ArrowUp','w','W',' '].includes(e.key)){ jumpQueued = true; jumpHeld = true; e.preventDefault(); }
   if(e.key === 'Enter'){
     if(state==='start') startGame();
     else if(state==='over') startGame();
@@ -341,6 +374,7 @@ window.addEventListener('keydown', e=>{
 window.addEventListener('keyup', e=>{
   if(['ArrowLeft','a','A'].includes(e.key)) keys.left = false;
   if(['ArrowRight','d','D'].includes(e.key)) keys.right = false;
+  if(['ArrowUp','w','W',' '].includes(e.key)) jumpHeld = false;
 });
 
 function bindHoldButton(el, onDown, onUp){
@@ -355,11 +389,12 @@ const btnJump = document.getElementById('btnJump');
 let touchLeft=false, touchRight=false;
 bindHoldButton(btnLeft, ()=>touchLeft=true, ()=>touchLeft=false);
 bindHoldButton(btnRight, ()=>touchRight=true, ()=>touchRight=false);
-bindHoldButton(btnJump, ()=>{ jumpQueued = true; }, ()=>{});
+bindHoldButton(btnJump, ()=>{ jumpQueued = true; touchJumpHeld = true; }, ()=>{ touchJumpHeld = false; });
 
 /* ===================== ゲーム制御 ===================== */
 const startPanel = document.getElementById('startPanel');
 const overPanel = document.getElementById('overPanel');
+const continueBtn = document.getElementById('continueBtn');
 const clearPanel = document.getElementById('clearPanel');
 const allClearPanel = document.getElementById('allClearPanel');
 const hud = document.getElementById('hud');
@@ -379,6 +414,20 @@ function startGame(){
   allClearPanel.classList.add('hidden');
   showControlsUI(true);
   if(actx && actx.state==='suspended') actx.resume();
+  startMusic();
+}
+
+function continueStage(){
+  const s = stage;
+  score = 0;
+  lives = 3;
+  applesCollected = 0;
+  overPanel.classList.add('hidden');
+  setupStage(s);
+  state = 'playing';
+  showControlsUI(true);
+  if(actx && actx.state==='suspended') actx.resume();
+  startMusic();
 }
 
 function stageClear(){
@@ -430,11 +479,18 @@ function endGame(){
   document.getElementById('finalStage').textContent = stage;
   document.getElementById('finalDist').textContent = dist;
   document.getElementById('bestScoreEnd').textContent = bestScore;
+  if(stage > 1){
+    document.getElementById('continueStageNum').textContent = stage;
+    continueBtn.classList.remove('hidden');
+  } else {
+    continueBtn.classList.add('hidden');
+  }
   overPanel.classList.remove('hidden');
 }
 
 document.getElementById('startBtn').addEventListener('click', startGame);
 document.getElementById('retryBtn').addEventListener('click', startGame);
+continueBtn.addEventListener('click', continueStage);
 document.getElementById('nextBtn').addEventListener('click', nextStage);
 document.getElementById('playAgainBtn').addEventListener('click', startGame);
 
@@ -448,20 +504,34 @@ function spawnBurst(x,y,color){
 function update(dt){
   if(state !== 'playing') return;
 
-  // 左右移動
+  // 左右移動(加減速つき)
   const left = keys.left || touchLeft;
   const right = keys.right || touchRight;
-  if(left && !right){ player.vx = -MOVE_SPEED; player.facing=-1; }
-  else if(right && !left){ player.vx = MOVE_SPEED; player.facing=1; }
-  else { player.vx = 0; }
+  const ACCEL = 1800, DECEL = 2200;
+  if(left && !right){ player.vx = Math.max(player.vx - ACCEL*dt, -MOVE_SPEED); player.facing=-1; }
+  else if(right && !left){ player.vx = Math.min(player.vx + ACCEL*dt, MOVE_SPEED); player.facing=1; }
+  else if(player.vx > 0){ player.vx = Math.max(0, player.vx - DECEL*dt); }
+  else if(player.vx < 0){ player.vx = Math.min(0, player.vx + DECEL*dt); }
 
-  // ジャンプ
-  if(jumpQueued && player.onGround){
+  // ジャンプ(コヨーテタイム+先行入力バッファ+可変ジャンプ高)
+  const wasOnGround = player.onGround;
+  if(jumpQueued){ player.jumpBufferT = 0.12; }
+  jumpQueued = false;
+  if(player.jumpBufferT > 0) player.jumpBufferT -= dt;
+  const canJump = player.onGround || player.coyoteT > 0;
+  if(player.jumpBufferT > 0 && canJump){
     player.vy = JUMP_VEL;
     player.onGround = false;
+    player.coyoteT = 0;
+    player.jumpBufferT = 0;
+    player.jumpCut = false;
     SFX.jump();
   }
-  jumpQueued = false;
+  const jumpHeldNow = jumpHeld || touchJumpHeld;
+  if(player.vy < 0 && !jumpHeldNow && !player.jumpCut){
+    player.vy *= 0.45;
+    player.jumpCut = true;
+  }
 
   // 重力
   player.vy = clamp(player.vy + GRAVITY*dt, -99999, MAX_FALL);
@@ -479,15 +549,20 @@ function update(dt){
   if(seg){
     const bottom = player.y + player.h;
     if(player.vy >= 0 && bottom >= seg.y && prevBottom <= seg.y + 2){
+      const impactSpeed = player.vy;
       player.y = seg.y - player.h;
       player.vy = 0;
       player.onGround = true;
-      if(player.invuln <= 0 || true){
-        const hazardHere = hazards.some(h=> Math.abs((h.x+h.w/2)-cx) < 26 && Math.abs(h.y-seg.y) < 30);
-        if(!hazardHere && isClearAhead(cx, 150)){ lastSafeX = player.x; lastSafeY = seg.y; }
+      player.jumpCut = false;
+      if(!wasOnGround && impactSpeed > 260){
+        spawnBurst(player.x+player.w/2, player.y+player.h, '#c9a06a');
       }
+      const hazardHere = hazards.some(h=> Math.abs((h.x+h.w/2)-cx) < 26 && Math.abs(h.y-seg.y) < 30);
+      if(!hazardHere && isClearAhead(cx, 150)){ lastSafeX = player.x; lastSafeY = seg.y; }
     }
   }
+  if(wasOnGround && !player.onGround){ player.coyoteT = 0.12; }
+  else if(player.coyoteT > 0){ player.coyoteT -= dt; }
 
   // 落下死(隙間に落ちた)
   if(player.y > BASE_H + 200){
@@ -528,12 +603,21 @@ function update(dt){
     if(Math.sqrt(dx*dx+dy*dy) < ap.r + 22){
       ap.alive = false;
       score += 10;
+      applesCollected++;
       SFX.collect();
       spawnBurst(ap.x, ap.y, '#ff6b6b');
+      if(applesCollected % 20 === 0){
+        lives = Math.min(lives+1, 9);
+        SFX.oneup();
+        toastText = '1UP！';
+        toastT = 1.5;
+        spawnBurst(player.x+player.w/2, player.y, '#ffd23f');
+      }
     }
   }
 
   if(player.invuln > 0) player.invuln -= dt;
+  if(toastT > 0) toastT -= dt;
   player.animT += dt;
 
   distance = Math.max(distance, player.x);
@@ -597,6 +681,23 @@ function roundCloud(x,y){
   ctx.fill();
 }
 
+function drawPits(){
+  const sorted = segments.slice().sort((a,b)=>a.x1-b.x1);
+  for(let i=0;i<sorted.length-1;i++){
+    const a = sorted[i], b = sorted[i+1];
+    if(b.x1 - a.x2 > 2){
+      const x1 = worldToScreenX(a.x2), x2 = worldToScreenX(b.x1);
+      if(x2 < -20 || x1 > BASE_W+20) continue;
+      const topY = Math.min(a.y,b.y);
+      const g = ctx.createLinearGradient(0, topY, 0, BASE_H);
+      g.addColorStop(0, 'rgba(25,15,35,0.55)');
+      g.addColorStop(1, 'rgba(10,5,15,0.88)');
+      ctx.fillStyle = g;
+      ctx.fillRect(x1, topY, x2-x1, BASE_H-topY);
+    }
+  }
+}
+
 function drawSegments(){
   for(const s of segments){
     const x1 = worldToScreenX(s.x1), x2 = worldToScreenX(s.x2);
@@ -608,6 +709,13 @@ function drawSegments(){
     ctx.fillRect(x1, y+18, x2-x1, BASE_H - (y+18) + 40);
     ctx.fillStyle = 'rgba(0,0,0,0.08)';
     ctx.fillRect(x1, y+18, x2-x1, 6);
+    if(s.warnEdge){
+      const stripeW = 18;
+      for(let sx=0; sx<stripeW; sx+=6){
+        ctx.fillStyle = (Math.floor(sx/6)%2===0) ? '#ffd23f' : '#2a2a2a';
+        ctx.fillRect(x2-stripeW+sx, y-5, 6, 5);
+      }
+    }
   }
 }
 
@@ -778,19 +886,32 @@ function drawPlayer(){
 }
 
 function drawHUD(){
-  // ライフ(ハート)
+  // ライフ(ハート、1UPで3個より増える)
   ctx.font = '20px sans-serif';
   ctx.textAlign = 'left';
-  for(let i=0;i<3;i++){
-    ctx.fillStyle = i < lives ? '#ff5c7a' : 'rgba(255,255,255,0.35)';
+  const heartN = clamp(lives, 0, 9);
+  for(let i=0;i<heartN;i++){
+    ctx.fillStyle = '#ff5c7a';
     ctx.beginPath();
-    const hx = BASE_W-30-i*30, hy=26;
+    const hx = BASE_W-30-i*26, hy=26;
     ctx.moveTo(hx,hy+6);
     ctx.bezierCurveTo(hx,hy,hx-10,hy,hx-10,hy+6);
     ctx.bezierCurveTo(hx-10,hy+12,hx,hy+16,hx,hy+20);
     ctx.bezierCurveTo(hx,hy+16,hx+10,hy+12,hx+10,hy+6);
     ctx.bezierCurveTo(hx+10,hy,hx,hy,hx,hy+6);
     ctx.fill();
+  }
+  if(toastT > 0){
+    ctx.save();
+    ctx.globalAlpha = clamp(toastT/1.5, 0, 1);
+    ctx.fillStyle = '#ffd23f';
+    ctx.strokeStyle = '#6b4034';
+    ctx.lineWidth = 3;
+    ctx.font = 'bold 30px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.strokeText(toastText, BASE_W/2, 70);
+    ctx.fillText(toastText, BASE_W/2, 70);
+    ctx.restore();
   }
 }
 
@@ -801,6 +922,7 @@ function render(){
   ctx.setTransform(dpr*scale,0,0,dpr*scale,0,0);
 
   drawBackground();
+  drawPits();
   drawSegments();
   drawHazards();
   drawApples();
