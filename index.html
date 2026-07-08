@@ -61,16 +61,30 @@
     display:flex; align-items:center; justify-content:center;
     font-size:18px; cursor:pointer; touch-action:none;
   }
+  #homeBtn{
+    position:fixed; top:10px; left:14px; z-index:20; pointer-events:auto;
+    width:38px; height:38px; border-radius:50%;
+    background:rgba(107,64,52,0.45); border:2px solid rgba(255,255,255,0.6);
+    display:flex; align-items:center; justify-content:center;
+    font-size:18px; cursor:pointer; touch-action:none;
+  }
+  .btnBlock{ display:block; width:82%; margin:12px auto 0; }
 </style>
 </head>
 <body>
 <canvas id="game"></canvas>
 
 <div id="muteBtn">🔊</div>
+<div class="hidden" id="homeBtn">🏠</div>
 
 <div class="hud hidden" id="hud">
   <div id="hudLeft">🍎 <span id="scoreVal">0</span></div>
   <div id="hudRight"></div>
+</div>
+
+<div class="hud hidden" id="fruitHud">
+  <div id="fruitHudLeft">⏱️ <span id="fruitTimeVal">60</span>s</div>
+  <div id="fruitHudRight">🍎 <span id="fruitScoreVal">0</span>pt</div>
 </div>
 
 <div id="controls">
@@ -80,7 +94,13 @@
 </div>
 
 <div id="overlay">
-  <div class="panel" id="startPanel">
+  <div class="panel" id="gameSelectPanel">
+    <h1>🎮 ゲームをえらぼう</h1>
+    <p>あそびたいミニゲームをえらんでね！</p>
+    <button class="btn btnBlock" id="selectSidescrollBtn">🐰 うさぎのりんご大冒険</button>
+    <button class="btn btnBlock" id="selectFruitCatchBtn">🧺 フルーツキャッチ</button>
+  </div>
+  <div class="panel hidden" id="startPanel">
     <h1>🐰 うさぎのりんご大冒険</h1>
     <p>障害物をよけながらりんごを集め、ゴールを目指そう！<br>敵は上から踏んでやっつけよう。ステージを進むほど難しくなるよ。</p>
     <p>全3ワールド(1〜3)×各6ステージの全18ステージ！ワールドが変わると景色とBGMもガラリと変わるよ。</p>
@@ -108,6 +128,23 @@
     <p class="big">最終スコア：<span id="allClearScore">0</span></p>
     <p>ベストスコア：<span id="allClearBest">0</span></p>
     <button class="btn" id="playAgainBtn">最初から遊ぶ</button>
+  </div>
+
+  <div class="panel hidden" id="fruitStartPanel">
+    <h1>🧺 フルーツキャッチ</h1>
+    <p>空から落ちてくるりんごをカゴでキャッチしよう！<br>制限時間は60秒、たくさんキャッチしてハイスコアを目指そう。</p>
+    <p>🔴 赤いりんご：1pt　🥈 銀のりんご：3pt　🥇 金のりんご：5pt</p>
+    <p>PC： ← → で移動 / スマホ：画面下のボタンで操作</p>
+    <div class="big">ベストスコア：<span id="fruitBestStart">0</span></div>
+    <button class="btn" id="fruitStartBtn">スタート</button>
+  </div>
+  <div class="panel hidden" id="fruitOverPanel">
+    <h1>⏰ タイムアップ！</h1>
+    <p class="big">スコア：<span id="fruitFinalScore">0</span>pt</p>
+    <p>🔴 <span id="fruitRedCount">0</span>個　🥈 <span id="fruitSilverCount">0</span>個　🥇 <span id="fruitGoldCount">0</span>個</p>
+    <p>ベストスコア：<span id="fruitBestEnd">0</span></p>
+    <button class="btn" id="fruitRetryBtn">もう一度</button>
+    <button class="btn btnBlock" id="fruitMenuBtn">ゲーム選択へ</button>
   </div>
 </div>
 
@@ -488,7 +525,59 @@ muteBtn.addEventListener('pointerdown', e=>{
   updateMuteBtn();
   if(muted && musicTimer){ clearInterval(musicTimer); musicTimer = null; }
   else if(!muted && state === 'playing'){ startMusic(); if(actx && actx.state==='suspended') actx.resume(); }
+  if(muted && fruitMusicTimer){ clearInterval(fruitMusicTimer); fruitMusicTimer = null; }
+  else if(!muted && fruitState === 'playing'){ startFruitMusic(); if(actx && actx.state==='suspended') actx.resume(); }
 });
+
+/* ===================== ゲームハブ(複数ミニゲーム切り替え) ===================== */
+let activeGame = null; // null(メニュー) | 'sidescroll' | 'fruitcatch'
+const gameSelectPanel = document.getElementById('gameSelectPanel');
+const homeBtn = document.getElementById('homeBtn');
+
+function clearCanvasView(){
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+}
+
+function goToMenu(){
+  // 横スクロール側の後片付け
+  if(musicTimer){ clearInterval(musicTimer); musicTimer = null; currentMusicWorld = null; }
+  showControlsUI(false);
+  startPanel.classList.add('hidden');
+  overPanel.classList.add('hidden');
+  clearPanel.classList.add('hidden');
+  allClearPanel.classList.add('hidden');
+  // フルーツキャッチ側の後片付け
+  if(fruitMusicTimer){ clearInterval(fruitMusicTimer); fruitMusicTimer = null; }
+  showFruitControlsUI(false);
+  fruitStartPanel.classList.add('hidden');
+  fruitOverPanel.classList.add('hidden');
+  fruitState = 'start';
+  activeGame = null;
+  homeBtn.classList.add('hidden');
+  clearCanvasView();
+  gameSelectPanel.classList.remove('hidden');
+}
+
+function selectSidescroll(){
+  activeGame = 'sidescroll';
+  gameSelectPanel.classList.add('hidden');
+  document.getElementById('bestScoreStart').textContent = bestScore;
+  startPanel.classList.remove('hidden');
+  homeBtn.classList.remove('hidden');
+}
+
+function selectFruitCatch(){
+  activeGame = 'fruitcatch';
+  gameSelectPanel.classList.add('hidden');
+  document.getElementById('fruitBestStart').textContent = fruitBestScore;
+  fruitStartPanel.classList.remove('hidden');
+  homeBtn.classList.remove('hidden');
+}
+
+homeBtn.addEventListener('click', goToMenu);
+document.getElementById('selectSidescrollBtn').addEventListener('click', selectSidescroll);
+document.getElementById('selectFruitCatchBtn').addEventListener('click', selectFruitCatch);
 
 /* ===================== ゲーム制御 ===================== */
 const startPanel = document.getElementById('startPanel');
@@ -1118,9 +1207,270 @@ function render(){
   if(state==='playing') drawHUD();
 }
 
+/* ===================== ミニゲーム2: フルーツキャッチ ===================== */
+const FRUIT_TIME_LIMIT = 60;
+const FRUIT_PLAYER_SPEED = 420;
+const FRUIT_BASKET_W = 92;
+const FRUIT_BASKET_Y = GROUND_Y - 56;
+const FRUIT_BASKET_H = 42;
+const FRUIT_RADIUS = 15;
+const FRUIT_TYPES = [
+  { type:'red',    color:'#e0453f', pts:1, weight:74 },
+  { type:'silver', color:'#d8dee3', pts:3, weight:19 },
+  { type:'gold',   color:'#f4c948', pts:5, weight:7  }
+];
+function pickFruitType(){
+  const total = FRUIT_TYPES.reduce((s,f)=>s+f.weight,0);
+  let r = Math.random()*total;
+  for(const f of FRUIT_TYPES){ if(r < f.weight) return f; r -= f.weight; }
+  return FRUIT_TYPES[0];
+}
+function fruitSpawnInterval(p){ return clamp(0.85 - p*0.5, 0.35, 0.85); }
+function fruitFallSpeed(p){ return rand(150,190) + p*130; }
+
+const fruitStartPanel = document.getElementById('fruitStartPanel');
+const fruitOverPanel = document.getElementById('fruitOverPanel');
+const fruitHud = document.getElementById('fruitHud');
+
+let fruitState = 'start'; // start | playing | over
+let fruitBestScore = parseInt(localStorage.getItem('usagi_fruit_best')||'0',10) || 0;
+let fruitPlayer, fruits, fruitParticles;
+let fruitElapsed = 0, fruitTimeLeft = FRUIT_TIME_LIMIT, fruitScore = 0, fruitSpawnTimer = 0;
+let fruitCatchCount = { red:0, silver:0, gold:0 };
+let fruitMusicTimer = null;
+
+function showFruitControlsUI(show){
+  [btnLeft, btnRight].forEach(b=> b.classList.toggle('hidden', !show));
+  fruitHud.classList.toggle('hidden', !show);
+}
+
+function resetFruitGame(){
+  fruitElapsed = 0;
+  fruitTimeLeft = FRUIT_TIME_LIMIT;
+  fruitScore = 0;
+  fruitSpawnTimer = 0.4;
+  fruitCatchCount = { red:0, silver:0, gold:0 };
+  fruitPlayer = { x: BASE_W/2 - FRUIT_BASKET_W/2, facing:1 };
+  fruits = [];
+  fruitParticles = [];
+}
+
+function startFruitMusic(){
+  if(fruitMusicTimer) return;
+  const notes = [392.0, 440.0, 493.9, 587.3, 493.9, 440.0, 523.3, 440.0];
+  let step = 0;
+  fruitMusicTimer = setInterval(()=>{
+    if(!actx || actx.state !== 'running') return;
+    const base = notes[step % notes.length];
+    sfx(base/2, 0.3, 'triangle', 0.04);
+    if(step % 2 === 0) sfx(base, 0.15, 'sine', 0.03);
+    step++;
+  }, 240);
+}
+
+function startFruitGame(){
+  resetFruitGame();
+  fruitState = 'playing';
+  fruitStartPanel.classList.add('hidden');
+  fruitOverPanel.classList.add('hidden');
+  showFruitControlsUI(true);
+  if(actx && actx.state==='suspended') actx.resume();
+  startFruitMusic();
+}
+
+function endFruitGame(){
+  fruitState = 'over';
+  if(fruitMusicTimer){ clearInterval(fruitMusicTimer); fruitMusicTimer = null; }
+  SFX.gameover();
+  showFruitControlsUI(false);
+  if(fruitScore > fruitBestScore){ fruitBestScore = fruitScore; localStorage.setItem('usagi_fruit_best', String(fruitBestScore)); }
+  document.getElementById('fruitFinalScore').textContent = fruitScore;
+  document.getElementById('fruitRedCount').textContent = fruitCatchCount.red;
+  document.getElementById('fruitSilverCount').textContent = fruitCatchCount.silver;
+  document.getElementById('fruitGoldCount').textContent = fruitCatchCount.gold;
+  document.getElementById('fruitBestEnd').textContent = fruitBestScore;
+  fruitOverPanel.classList.remove('hidden');
+}
+
+function fruitCatchSfx(type){
+  if(type==='gold') sfx(1050,0.18,'triangle',0.18);
+  else if(type==='silver') sfx(760,0.15,'triangle',0.16);
+  else sfx(560,0.12,'triangle',0.14);
+}
+
+function fruitSpawnBurst(x,y,color){
+  for(let i=0;i<7;i++){
+    fruitParticles.push({ x,y, vx:rand(-120,120), vy:rand(-200,-30), life:0.5, color });
+  }
+}
+
+function fruitUpdate(dt){
+  if(fruitState !== 'playing') return;
+
+  const left = keys.left || touchLeft;
+  const right = keys.right || touchRight;
+  if(left && !right){ fruitPlayer.x -= FRUIT_PLAYER_SPEED*dt; fruitPlayer.facing = -1; }
+  else if(right && !left){ fruitPlayer.x += FRUIT_PLAYER_SPEED*dt; fruitPlayer.facing = 1; }
+  fruitPlayer.x = clamp(fruitPlayer.x, 6, BASE_W - FRUIT_BASKET_W - 6);
+
+  fruitElapsed += dt;
+  fruitTimeLeft = Math.max(0, FRUIT_TIME_LIMIT - fruitElapsed);
+  const progress = clamp(fruitElapsed / FRUIT_TIME_LIMIT, 0, 1);
+
+  fruitSpawnTimer -= dt;
+  if(fruitSpawnTimer <= 0){
+    fruitSpawnTimer = fruitSpawnInterval(progress);
+    const ft = pickFruitType();
+    fruits.push({
+      x: rand(28, BASE_W-28), y: -20, vy: fruitFallSpeed(progress),
+      r: FRUIT_RADIUS, type: ft.type, color: ft.color, pts: ft.pts,
+      rot: rand(0, Math.PI*2), rotSpeed: rand(-2.4, 2.4)
+    });
+  }
+
+  for(const f of fruits){
+    f.y += f.vy*dt;
+    f.rot += f.rotSpeed*dt;
+    if(f.caught || f.missed) continue;
+    if(f.y + f.r >= FRUIT_BASKET_Y && f.y - f.r <= FRUIT_BASKET_Y + FRUIT_BASKET_H*0.6 &&
+       f.x >= fruitPlayer.x && f.x <= fruitPlayer.x + FRUIT_BASKET_W){
+      f.caught = true;
+      fruitScore += f.pts;
+      fruitCatchCount[f.type]++;
+      fruitCatchSfx(f.type);
+      fruitSpawnBurst(f.x, FRUIT_BASKET_Y, f.color);
+    } else if(f.y - f.r > BASE_H + 20){
+      f.missed = true;
+    }
+  }
+  fruits = fruits.filter(f=>!f.caught && !f.missed);
+
+  for(const p of fruitParticles){
+    p.x += p.vx*dt; p.y += p.vy*dt; p.vy += 900*dt; p.life -= dt;
+  }
+  fruitParticles = fruitParticles.filter(p=>p.life>0);
+
+  document.getElementById('fruitScoreVal').textContent = fruitScore;
+  document.getElementById('fruitTimeVal').textContent = Math.ceil(fruitTimeLeft);
+
+  if(fruitTimeLeft <= 0){ endFruitGame(); }
+}
+
+function drawFruitBackground(){
+  const g = ctx.createLinearGradient(0,0,0,BASE_H);
+  g.addColorStop(0, '#aee2ff');
+  g.addColorStop(1, '#fef3e0');
+  ctx.fillStyle = g;
+  ctx.fillRect(0,0,BASE_W,BASE_H);
+  ctx.fillStyle = 'rgba(255,255,255,0.85)';
+  roundCloud(120,70); roundCloud(420,110); roundCloud(760,60);
+  ctx.fillStyle = '#bfe6a8';
+  ctx.beginPath(); ctx.ellipse(BASE_W*0.2, GROUND_Y+40, 200, 100, 0, Math.PI, 0); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(BASE_W*0.75, GROUND_Y+40, 220, 100, 0, Math.PI, 0); ctx.fill();
+  ctx.fillStyle = '#8bc76a';
+  ctx.fillRect(0, GROUND_Y, BASE_W, 18);
+  ctx.fillStyle = '#b98455';
+  ctx.fillRect(0, GROUND_Y+18, BASE_W, BASE_H-(GROUND_Y+18));
+}
+
+function drawFruits(){
+  for(const f of fruits){
+    ctx.save();
+    ctx.translate(f.x, f.y);
+    ctx.rotate(f.rot);
+    ctx.beginPath();
+    ctx.fillStyle = f.color;
+    ctx.arc(0,0,f.r,0,Math.PI*2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.fillStyle = 'rgba(255,255,255,0.55)';
+    ctx.arc(-f.r*0.35, -f.r*0.35, f.r*0.32, 0, Math.PI*2);
+    ctx.fill();
+    ctx.fillStyle = '#5a8a3a';
+    ctx.fillRect(-2, -f.r-6, 4, 7);
+    ctx.restore();
+  }
+}
+
+function drawFruitParticles(){
+  for(const p of fruitParticles){
+    ctx.globalAlpha = clamp(p.life/0.5, 0, 1);
+    ctx.fillStyle = p.color;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 4, 0, Math.PI*2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawFruitPlayer(){
+  const centerX = fruitPlayer.x + FRUIT_BASKET_W/2;
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,0.18)';
+  ctx.beginPath(); ctx.ellipse(centerX, GROUND_Y+6, FRUIT_BASKET_W*0.4, 6, 0,0,Math.PI*2); ctx.fill();
+  ctx.restore();
+
+  const bw = 54, bh = bw*BUNNY_ASPECT;
+  ctx.save();
+  ctx.translate(centerX, GROUND_Y - 8);
+  ctx.scale(-fruitPlayer.facing, 1);
+  if(BUNNY_IMG.complete && BUNNY_IMG.naturalWidth>0){
+    ctx.drawImage(BUNNY_IMG, -bw/2, -bh, bw, bh);
+  }
+  ctx.restore();
+
+  ctx.save();
+  ctx.translate(fruitPlayer.x, FRUIT_BASKET_Y);
+  ctx.fillStyle = '#c9925a';
+  ctx.beginPath();
+  ctx.moveTo(0, 6);
+  ctx.quadraticCurveTo(0, FRUIT_BASKET_H, FRUIT_BASKET_W/2, FRUIT_BASKET_H+6);
+  ctx.quadraticCurveTo(FRUIT_BASKET_W, FRUIT_BASKET_H, FRUIT_BASKET_W, 6);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = '#8a5a3a';
+  ctx.lineWidth = 2.5;
+  for(let i=1;i<=3;i++){
+    ctx.beginPath();
+    ctx.moveTo(FRUIT_BASKET_W*(i/4), 4);
+    ctx.lineTo(FRUIT_BASKET_W*(i/4), FRUIT_BASKET_H+2);
+    ctx.stroke();
+  }
+  ctx.fillStyle = '#a97540';
+  ctx.fillRect(-2, -6, FRUIT_BASKET_W+4, 9);
+  ctx.restore();
+}
+
+function drawFruitHUDBar(){
+  const barW = BASE_W*0.5, barX = BASE_W/2 - barW/2, barY = 46;
+  const p = clamp(fruitTimeLeft/FRUIT_TIME_LIMIT, 0, 1);
+  ctx.fillStyle = 'rgba(255,255,255,0.5)';
+  ctx.fillRect(barX, barY, barW, 10);
+  ctx.fillStyle = p < 0.2 ? '#e0453f' : '#7fbf5a';
+  ctx.fillRect(barX, barY, barW*p, 10);
+}
+
+function fruitRender(){
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  const scale = (canvas.height/dpr) / BASE_H;
+  ctx.setTransform(dpr*scale,0,0,dpr*scale,0,0);
+
+  drawFruitBackground();
+  drawFruits();
+  if(fruitState==='playing' || fruitState==='over') drawFruitPlayer();
+  drawFruitParticles();
+  if(fruitState==='playing') drawFruitHUDBar();
+}
+
+document.getElementById('fruitStartBtn').addEventListener('click', startFruitGame);
+document.getElementById('fruitRetryBtn').addEventListener('click', startFruitGame);
+document.getElementById('fruitMenuBtn').addEventListener('click', goToMenu);
+
 /* ===================== メインループ ===================== */
 let lastT = performance.now();
 function loop(t){
+  if(activeGame !== 'sidescroll'){ lastT = t; requestAnimationFrame(loop); return; }
   let dt = (t - lastT)/1000;
   lastT = t;
   dt = Math.min(dt, 0.033);
@@ -1128,8 +1478,21 @@ function loop(t){
   render();
   requestAnimationFrame(loop);
 }
+
+let fruitLastT = performance.now();
+function fruitLoop(t){
+  if(activeGame !== 'fruitcatch'){ fruitLastT = t; requestAnimationFrame(fruitLoop); return; }
+  let dt = (t - fruitLastT)/1000;
+  fruitLastT = t;
+  dt = Math.min(dt, 0.033);
+  fruitUpdate(dt);
+  fruitRender();
+  requestAnimationFrame(fruitLoop);
+}
+
 resetGame();
 requestAnimationFrame(loop);
+requestAnimationFrame(fruitLoop);
 
 })();
 </script>
