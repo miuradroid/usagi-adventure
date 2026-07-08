@@ -54,10 +54,19 @@
     padding:0 14px; pointer-events:none; color:#fff; font-weight:bold; text-shadow:0 2px 3px rgba(0,0,0,0.5);
     font-size:16px;
   }
+  #muteBtn{
+    position:fixed; top:10px; right:14px; z-index:20; pointer-events:auto;
+    width:38px; height:38px; border-radius:50%;
+    background:rgba(107,64,52,0.45); border:2px solid rgba(255,255,255,0.6);
+    display:flex; align-items:center; justify-content:center;
+    font-size:18px; cursor:pointer; touch-action:none;
+  }
 </style>
 </head>
 <body>
 <canvas id="game"></canvas>
+
+<div id="muteBtn">🔊</div>
 
 <div class="hud hidden" id="hud">
   <div id="hudLeft">🍎 <span id="scoreVal">0</span></div>
@@ -145,7 +154,9 @@ BUNNY_IMG.src = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAjEAAAI4CAYAAACbY
 
 /* ===================== サウンド(簡易WebAudio) ===================== */
 let actx = null;
+let muted = (localStorage.getItem('usagi_muted') === '1');
 function sfx(freq, dur, type, vol){
+  if(muted) return;
   try{
     if(!actx) actx = new (window.AudioContext||window.webkitAudioContext)();
     const o = actx.createOscillator();
@@ -433,6 +444,22 @@ let touchLeft=false, touchRight=false;
 bindHoldButton(btnLeft, ()=>touchLeft=true, ()=>touchLeft=false);
 bindHoldButton(btnRight, ()=>touchRight=true, ()=>touchRight=false);
 bindHoldButton(btnJump, ()=>{ jumpQueued = true; touchJumpHeld = true; }, ()=>{ touchJumpHeld = false; });
+
+/* ===================== ミュートボタン ===================== */
+const muteBtn = document.getElementById('muteBtn');
+function updateMuteBtn(){
+  muteBtn.textContent = muted ? '🔇' : '🔊';
+}
+updateMuteBtn();
+muteBtn.addEventListener('pointerdown', e=>{
+  e.preventDefault();
+  e.stopPropagation();
+  muted = !muted;
+  localStorage.setItem('usagi_muted', muted ? '1' : '0');
+  updateMuteBtn();
+  if(muted && musicTimer){ clearInterval(musicTimer); musicTimer = null; }
+  else if(!muted && state === 'playing'){ startMusic(); if(actx && actx.state==='suspended') actx.resume(); }
+});
 
 /* ===================== ゲーム制御 ===================== */
 const startPanel = document.getElementById('startPanel');
