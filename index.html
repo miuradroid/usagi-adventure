@@ -50,8 +50,8 @@
   #btnRight{ left:98px; }
   #btnJump{ right:22px; width:84px; height:84px; font-size:15px; background:rgba(255,158,181,0.55); }
   .hud{
-    position:fixed; top:10px; left:0; right:0; display:flex; justify-content:space-between;
-    padding:0 14px; pointer-events:none; color:#fff; font-weight:bold; text-shadow:0 2px 3px rgba(0,0,0,0.5);
+    position:fixed; top:16px; left:0; right:0; display:flex; justify-content:space-between;
+    padding:0 60px; pointer-events:none; color:#fff; font-weight:bold; text-shadow:0 2px 3px rgba(0,0,0,0.5);
     font-size:16px;
   }
   #muteBtn{
@@ -1488,8 +1488,20 @@ function fruitLoop(t){
   let dt = (t - fruitLastT)/1000;
   fruitLastT = t;
   dt = Math.min(dt, 0.033);
-  fruitUpdate(dt);
-  fruitRender();
+  try{
+    fruitUpdate(dt);
+    fruitRender();
+  }catch(err){
+    ctx.setTransform(1,0,0,1,0,0);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0,0,canvas.width,canvas.height);
+    ctx.fillStyle = '#c0392b';
+    ctx.font = '16px monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText('fruitLoop error: ' + (err && err.message ? err.message : err), 10, 30);
+    if(err && err.stack) ctx.fillText(String(err.stack).slice(0,300), 10, 55);
+    console.error('fruitLoop error', err);
+  }
   requestAnimationFrame(fruitLoop);
 }
 
